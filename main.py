@@ -468,28 +468,26 @@ class RBF_GUI:
         if self.X_data is None or self.Y_data is None:
             messagebox.showerror("Error", "No hay datos cargados")
             return
-        
+        num_inputs = self.X_data.shape[1]
+        num_centers = self.num_centers_var.get()
+        if num_centers < num_inputs:
+            messagebox.showerror("Error", f"El número de centros radiales no puede ser menor al número de entradas ({num_inputs}).")
+            return
         # Limpiar resultados anteriores
         self.results_text.delete(1.0, tk.END)
-        
         # Obtener parámetros
-        num_centers = self.num_centers_var.get()
         error_optimo = self.error_optimo_var.get()
-        
         # Entrenar
         self.results_text.insert(tk.END, "="*60 + "\n")
         self.results_text.insert(tk.END, "ENTRENAMIENTO DE RED NEURONAL RBF\n")
         self.results_text.insert(tk.END, "="*60 + "\n\n")
-        
         self.results_text.insert(tk.END, f"DATOS:\n")
         self.results_text.insert(tk.END, f"  • Patrones de entrenamiento: {len(self.X_data)}\n")
         self.results_text.insert(tk.END, f"  • Datos normalizados: {'SÍ (Min-Max 0-1)' if self.is_normalized else 'NO (datos originales)'}\n\n")
-        
         self.results_text.insert(tk.END, f"CONFIGURACIÓN:\n")
         self.results_text.insert(tk.END, f"  • Número de centros radiales: {num_centers}\n")
         self.results_text.insert(tk.END, f"  • Error de aproximación óptimo: {error_optimo}\n")
         self.results_text.insert(tk.END, f"  • Función de activación: FA = Ω² * ln(Ω)\n\n")
-        
         # Entrenar la red
         Y_pred, errors, error_general, A_matrix = self.rbf.train(
             self.X_data, self.Y_data, num_centers, error_optimo
