@@ -380,14 +380,16 @@ class RBF_GUI:
                 self.Y_data = Y
                 self.is_normalized = False
 
-            # Configurar Spinbox de centros radiales (1 .. N patrones)
+            # Configurar Spinbox de centros radiales (min = #entradas, max = #patrones)
+            min_centers = int(self.X_data.shape[1])
             max_centers = max(1, len(self.X_data))
             try:
-                self.centers_spin.config(from_=1, to=max_centers)
+                self.centers_spin.config(from_=min_centers, to=max_centers)
             except Exception:
                 pass
-            # Mantener un valor por defecto razonable
-            self.num_centers_var.set(min(self.num_centers_var.get(), max_centers))
+            # Ajustar valor actual a los límites
+            current = self.num_centers_var.get()
+            self.num_centers_var.set(min(max_centers, max(current, min_centers)))
 
             self.update_table()
             self.results_text.delete(1.0, tk.END)
@@ -615,12 +617,14 @@ class RBF_GUI:
         # Actualizar tabla
         self.update_table()
         # Ajustar Spinbox de centros
+        min_centers = int(self.X_data.shape[1])
         max_centers = max(1, len(self.X_data))
         try:
-            self.centers_spin.config(from_=1, to=max_centers)
+            self.centers_spin.config(from_=min_centers, to=max_centers)
         except Exception:
             pass
-        self.num_centers_var.set(min(self.num_centers_var.get(), max_centers))
+        current = self.num_centers_var.get()
+        self.num_centers_var.set(min(max_centers, max(current, min_centers)))
         
         self.results_text.delete(1.0, tk.END)
         self.results_text.insert(tk.END, "✓ Datos de ejemplo cargados exitosamente\n")
@@ -684,6 +688,15 @@ class RBF_GUI:
                     self.is_normalized = False
                 
                 self.update_table()
+                # Ajustar Spinbox: min = #entradas, max = #patrones
+                try:
+                    min_centers = int(self.X_data.shape[1])
+                    max_centers = max(1, len(self.X_data))
+                    self.centers_spin.config(from_=min_centers, to=max_centers)
+                    current = self.num_centers_var.get()
+                    self.num_centers_var.set(min(max_centers, max(current, min_centers)))
+                except Exception:
+                    pass
                 edit_window.destroy()
                 messagebox.showinfo("Éxito", f"Datos actualizados: {len(self.X_data)} patrones")
                 
@@ -699,8 +712,9 @@ class RBF_GUI:
             messagebox.showerror("Error", "No hay datos cargados")
             return
         num_centers = self.num_centers_var.get()
-        if num_centers < 1:
-            messagebox.showerror("Error", "El número de centros radiales debe ser al menos 1.")
+        num_inputs = int(self.X_data.shape[1])
+        if num_centers < num_inputs:
+            messagebox.showerror("Error", f"El número de centros radiales no puede ser menor al número de entradas ({num_inputs}).")
             return
         # Particionar datos 80/20
         n = len(self.X_data)
