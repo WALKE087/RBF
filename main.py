@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+import pickle
 class RBF_Network:
     def __init__(self):
         self.X_train = None
@@ -88,6 +89,18 @@ class RBF_GUI:
         self.data_max = None
         self.feature_names = None     # Nombres de columnas (incluye one-hot)
         self.target_mapping = None    # Mapeo de clases si Y es categórica
+        self.y_min = None
+        self.y_max = None
+        self.X_processed_df = None    # DataFrame tras get_dummies (para alineación)
+        self.y_series_loaded = None   # Serie original de Y del dataset cargado
+        # Estado de modelo cargado desde archivo (separado de los datos actuales)
+        self.model_feature_names = None
+        self.model_is_normalized = None
+        self.model_data_min = None
+        self.model_data_max = None
+        self.model_y_min = None
+        self.model_y_max = None
+        self.model_target_mapping = None
         
         # Crear interfaz
         self.create_widgets()
@@ -98,19 +111,24 @@ class RBF_GUI:
     def create_widgets(self):
         main_frame = tk.Frame(self.root, bg='#f0f0f0')
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
         left_frame = tk.Frame(main_frame, bg='#f0f0f0', width=520)
         # Mantener ancho fijo para evitar que la tabla aplaste las gráficas
         left_frame.pack_propagate(False)
         left_frame.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 5))
+
         right_frame = tk.Frame(main_frame, bg='#f0f0f0')
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
+
         # ===== PANEL IZQUIERDO =====
-        title_label = tk.Label(left_frame, text="RED NEURONAL RBF", 
-                              font=('Arial', 16, 'bold'), bg='#f0f0f0', fg='#2c3e50')
+        title_label = tk.Label(left_frame, text="RED NEURONAL RBF",
+                               font=('Arial', 16, 'bold'), bg='#f0f0f0', fg='#2c3e50')
         title_label.pack(pady=(0, 10))
-        data_frame = tk.LabelFrame(left_frame, text="Datos de Entrada", 
+
+        data_frame = tk.LabelFrame(left_frame, text="Datos de Entrada",
                                    font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=10, pady=10)
         data_frame.pack(fill=tk.BOTH, expand=False, pady=(0, 10))
+
         # Contenedor para Treeview con scrollbars
         tree_container = tk.Frame(data_frame, bg='#f0f0f0')
         tree_container.pack(fill=tk.BOTH, expand=True)
@@ -126,80 +144,91 @@ class RBF_GUI:
         self.tree.grid(row=0, column=0, sticky='nsew')
         vsb.grid(row=0, column=1, sticky='ns')
         hsb.grid(row=1, column=0, sticky='ew')
-        
+
         btn_frame = tk.Frame(data_frame, bg='#f0f0f0')
         btn_frame.pack(fill=tk.X, pady=(5, 0))
-        
+
         tk.Button(btn_frame, text="📂 Cargar Dataset", command=self.load_dataset,
-                 bg='#2ecc71', fg='white', font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=2)
+                  bg='#2ecc71', fg='white', font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="Cargar Ejemplo", command=self.load_example_data,
-                 bg='#3498db', fg='white', font=('Arial', 9)).pack(side=tk.LEFT, padx=2)
+                  bg='#3498db', fg='white', font=('Arial', 9)).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="Editar Datos", command=self.edit_data,
-                 bg='#9b59b6', fg='white', font=('Arial', 9)).pack(side=tk.LEFT, padx=2)
-        
+                  bg='#9b59b6', fg='white', font=('Arial', 9)).pack(side=tk.LEFT, padx=2)
+
         # Frame de configuración
-        config_frame = tk.LabelFrame(left_frame, text="Configuración de la Red", 
-                                    font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=10, pady=10)
+        config_frame = tk.LabelFrame(left_frame, text="Configuración de la Red",
+                                     font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=10, pady=10)
         config_frame.pack(fill=tk.X, pady=(0, 10))
-        
+
         # Normalización
         self.normalize_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(config_frame, text="Normalizar Datos (Min-Max 0-1)", 
-                      variable=self.normalize_var, bg='#f0f0f0', 
-                      font=('Arial', 9, 'bold'), command=self.toggle_normalization).grid(
-                      row=0, column=0, columnspan=2, sticky='w', pady=5)
-        
+        tk.Checkbutton(config_frame, text="Normalizar Datos (Min-Max 0-1)",
+                       variable=self.normalize_var, bg='#f0f0f0',
+                       font=('Arial', 9, 'bold'), command=self.toggle_normalization).grid(
+            row=0, column=0, columnspan=2, sticky='w', pady=5
+        )
+
         # Número de centros radiales
-        tk.Label(config_frame, text="Número de Centros Radiales:", 
-                bg='#f0f0f0', font=('Arial', 9)).grid(row=1, column=0, sticky='w', pady=5)
+        tk.Label(config_frame, text="Número de Centros Radiales:",
+                 bg='#f0f0f0', font=('Arial', 9)).grid(row=1, column=0, sticky='w', pady=5)
         self.num_centers_var = tk.IntVar(value=2)
         self.centers_spin = tk.Spinbox(
             config_frame, from_=1, to=10, textvariable=self.num_centers_var,
             width=10, font=('Arial', 9)
         )
         self.centers_spin.grid(row=1, column=1, sticky='w', padx=(10, 0))
-        
+
         # Error de aproximación óptimo
-        tk.Label(config_frame, text="Error de Aproximación Óptimo:", 
-                bg='#f0f0f0', font=('Arial', 9)).grid(row=2, column=0, sticky='w', pady=5)
+        tk.Label(config_frame, text="Error de Aproximación Óptimo:",
+                 bg='#f0f0f0', font=('Arial', 9)).grid(row=2, column=0, sticky='w', pady=5)
         self.error_optimo_var = tk.DoubleVar(value=0.1)
-        tk.Entry(config_frame, textvariable=self.error_optimo_var, 
-                width=10, font=('Arial', 9)).grid(row=2, column=1, sticky='w', padx=(10, 0))
-        
+        tk.Entry(config_frame, textvariable=self.error_optimo_var,
+                 width=10, font=('Arial', 9)).grid(row=2, column=1, sticky='w', padx=(10, 0))
+
         # Botón de entrenamiento
-        train_btn = tk.Button(left_frame, text="🚀 ENTRENAR RED RBF", 
-                             command=self.train_network,
-                             bg='#27ae60', fg='white', font=('Arial', 12, 'bold'),
-                             height=2, cursor='hand2')
+        train_btn = tk.Button(left_frame, text="🚀 ENTRENAR RED RBF",
+                              command=self.train_network,
+                              bg='#27ae60', fg='white', font=('Arial', 12, 'bold'),
+                              height=2, cursor='hand2')
         train_btn.pack(fill=tk.X, pady=(0, 10))
-        
+
+        # Botones de modelo (guardar/cargar/aplicar)
+        model_btns = tk.Frame(left_frame, bg='#f0f0f0')
+        model_btns.pack(fill=tk.X, pady=(0, 10))
+        tk.Button(model_btns, text="💾 Guardar Modelo", command=self.save_model,
+                  bg='#8e44ad', fg='white', font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=2)
+        tk.Button(model_btns, text="📥 Cargar Modelo", command=self.load_model,
+                  bg='#34495e', fg='white', font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=2)
+        tk.Button(model_btns, text="🔮 Predecir con Modelo", command=self.apply_loaded_model,
+                  bg='#d35400', fg='white', font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=2)
+
         # Frame de resultados
-        results_frame = tk.LabelFrame(left_frame, text="Resultados del Entrenamiento", 
-                                     font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=10, pady=10)
+        results_frame = tk.LabelFrame(left_frame, text="Resultados del Entrenamiento",
+                                      font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=10, pady=10)
         results_frame.pack(fill=tk.BOTH, expand=True)
-        
+
         # Área de texto para resultados
-        self.results_text = scrolledtext.ScrolledText(results_frame, wrap=tk.WORD, 
-                                                     font=('Courier', 9), height=15)
+        self.results_text = scrolledtext.ScrolledText(results_frame, wrap=tk.WORD,
+                                                      font=('Courier', 9), height=15)
         self.results_text.pack(fill=tk.BOTH, expand=True)
-        
+
         # ===== PANEL DERECHO - GRÁFICAS =====
-        
+
         # Frame superior para gráfica YD vs YR
-        graph1_frame = tk.LabelFrame(right_frame, text="Salidas Deseadas vs Salidas de la Red", 
-                                    font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=5, pady=5)
+        graph1_frame = tk.LabelFrame(right_frame, text="Salidas Deseadas vs Salidas de la Red",
+                                     font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=5, pady=5)
         graph1_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        
+
         self.fig1 = Figure(figsize=(6, 4), dpi=100)
         self.ax1 = self.fig1.add_subplot(111)
         self.canvas1 = FigureCanvasTkAgg(self.fig1, master=graph1_frame)
         self.canvas1.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
+
         # Frame inferior para gráfica de errores
-        graph2_frame = tk.LabelFrame(right_frame, text="Error General vs Error de Aproximación Óptimo", 
-                                    font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=5, pady=5)
+        graph2_frame = tk.LabelFrame(right_frame, text="Error General vs Error de Aproximación Óptimo",
+                                     font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=5, pady=5)
         graph2_frame.pack(fill=tk.BOTH, expand=True)
-        
+
         self.fig2 = Figure(figsize=(6, 4), dpi=100)
         self.ax2 = self.fig2.add_subplot(111)
         self.canvas2 = FigureCanvasTkAgg(self.fig2, master=graph2_frame)
@@ -232,10 +261,10 @@ class RBF_GUI:
                 X_normalized[:, i] = 0.0
 
         # Normalizar Y si tiene rango
-        y_min = np.min(Y)
-        y_max = np.max(Y)
-        if y_max - y_min != 0:
-            Y_normalized = (Y - y_min) / (y_max - y_min)
+        self.y_min = np.min(Y)
+        self.y_max = np.max(Y)
+        if self.y_max - self.y_min != 0:
+            Y_normalized = (Y - self.y_min) / (self.y_max - self.y_min)
         else:
             Y_normalized = np.zeros_like(Y, dtype=float)
 
@@ -324,6 +353,7 @@ class RBF_GUI:
             # One-hot encoding para columnas no numéricas en X (mantiene numéricas tal cual)
             X_processed = pd.get_dummies(X_df, drop_first=False)
             self.feature_names = list(X_processed.columns)
+            self.X_processed_df = X_processed.copy()
             X = X_processed.to_numpy(dtype=float)
 
             # Y: si no es numérica, codificar a enteros (etiquetas)
@@ -334,6 +364,9 @@ class RBF_GUI:
             else:
                 self.target_mapping = None
                 Y = y_series.to_numpy(dtype=float)
+
+            # Guardar serie de Y original
+            self.y_series_loaded = y_series.copy()
 
             # Guardar originales
             self.X_data_original = X.copy()
@@ -370,6 +403,189 @@ class RBF_GUI:
             self.results_text.insert(tk.END, "\n")
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar el archivo:\n{str(e)}")
+
+    def save_model(self):
+        """Guarda el modelo entrenado y metadatos necesarios para predecir sin reentrenar."""
+        if self.rbf.weights is None or self.rbf.centers is None:
+            messagebox.showerror("Error", "No hay modelo entrenado para guardar.")
+            return
+        model = {
+            'centers': self.rbf.centers,
+            'weights': self.rbf.weights,
+            'num_centers': self.rbf.num_centers,
+            'error_optimo': self.rbf.error_optimo,
+            'feature_names': self.feature_names,
+            'is_normalized': self.is_normalized,
+            'data_min': self.data_min,
+            'data_max': self.data_max,
+            'y_min': self.y_min,
+            'y_max': self.y_max,
+            'target_mapping': self.target_mapping
+        }
+        file_path = filedialog.asksaveasfilename(
+            title="Guardar Modelo",
+            defaultextension=".rbf.pkl",
+            filetypes=[("Modelo RBF", "*.rbf.pkl"), ("Todos", "*.*")]
+        )
+        if not file_path:
+            return
+        try:
+            with open(file_path, 'wb') as f:
+                pickle.dump(model, f)
+            messagebox.showinfo("Éxito", "Modelo guardado correctamente.")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar el modelo:\n{str(e)}")
+
+    def load_model(self):
+        """Carga un modelo previamente guardado."""
+        file_path = filedialog.askopenfilename(
+            title="Cargar Modelo",
+            filetypes=[("Modelo RBF", "*.rbf.pkl"), ("Todos", "*.*")]
+        )
+        if not file_path:
+            return
+        try:
+            with open(file_path, 'rb') as f:
+                model = pickle.load(f)
+            # Restaurar en la red
+            self.rbf.centers = model.get('centers')
+            self.rbf.weights = model.get('weights')
+            self.rbf.num_centers = model.get('num_centers')
+            self.rbf.error_optimo = model.get('error_optimo', self.error_optimo_var.get())
+            # Guardar metadatos del modelo (separados de los del dataset activo)
+            self.model_feature_names = model.get('feature_names')
+            self.model_is_normalized = model.get('is_normalized', True)
+            self.model_data_min = model.get('data_min')
+            self.model_data_max = model.get('data_max')
+            self.model_y_min = model.get('y_min')
+            self.model_y_max = model.get('y_max')
+            self.model_target_mapping = model.get('target_mapping')
+            messagebox.showinfo("Éxito", "Modelo cargado correctamente. Ya puedes predecir sobre el dataset cargado.")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar el modelo:\n{str(e)}")
+
+    def _align_features_to_model(self, X_df: pd.DataFrame):
+        """Alinea las columnas de X_df a las del modelo cargado, rellenando faltantes con 0 y descartando extras."""
+        if not isinstance(X_df, pd.DataFrame) or not self.model_feature_names:
+            raise ValueError("No hay modelo cargado o X_df inválido")
+        return X_df.reindex(columns=self.model_feature_names, fill_value=0.0)
+
+    def apply_loaded_model(self):
+        """Aplica el modelo cargado sobre el dataset actual sin reentrenar y muestra resultados."""
+        try:
+            if self.rbf.weights is None or self.rbf.centers is None:
+                messagebox.showerror("Error", "Primero carga o entrena un modelo.")
+                return
+            if self.X_processed_df is None:
+                messagebox.showerror("Error", "Carga primero un dataset para aplicar el modelo.")
+                return
+
+            # Alinear características a las esperadas por el modelo
+            X_aligned_df = self._align_features_to_model(self.X_processed_df)
+            X_aligned = X_aligned_df.to_numpy(dtype=float)
+
+            # Normalizar con los parámetros del modelo, si corresponde
+            if self.model_is_normalized and self.model_data_min is not None and self.model_data_max is not None:
+                Xn = np.zeros_like(X_aligned, dtype=float)
+                for i in range(X_aligned.shape[1]):
+                    min_val = self.model_data_min[i]
+                    max_val = self.model_data_max[i]
+                    if max_val - min_val != 0:
+                        Xn[:, i] = (X_aligned[:, i] - min_val) / (max_val - min_val)
+                    else:
+                        Xn[:, i] = 0.0
+            else:
+                Xn = X_aligned
+
+            # Predecir
+            Y_pred = self.rbf.predict(Xn)
+
+            # Preparar Y deseada en la misma escala del modelo (si disponible)
+            errors = None
+            error_general = None
+            if self.y_series_loaded is not None:
+                y_true_series = self.y_series_loaded
+                if self.model_target_mapping:  # Categórica
+                    # Convertir etiquetas a códigos usando el mapeo del modelo (invertido)
+                    inv_map = {v: k for k, v in self.model_target_mapping.items()}
+                    y_codes = []
+                    for val in y_true_series:
+                        y_codes.append(inv_map.get(val, np.nan))
+                    y_codes = np.array(y_codes, dtype=float)
+                    # Si el modelo normaliza Y, escalar
+                    if self.model_is_normalized and self.model_y_min is not None and self.model_y_max is not None:
+                        if (self.model_y_max - self.model_y_min) != 0:
+                            Y_true_model = (y_codes - self.model_y_min) / (self.model_y_max - self.model_y_min)
+                        else:
+                            Y_true_model = np.zeros_like(y_codes, dtype=float)
+                    else:
+                        Y_true_model = y_codes
+                else:  # Numérica
+                    y_vals = y_true_series.astype(float).to_numpy()
+                    if self.model_is_normalized and self.model_y_min is not None and self.model_y_max is not None:
+                        if (self.model_y_max - self.model_y_min) != 0:
+                            Y_true_model = (y_vals - self.model_y_min) / (self.model_y_max - self.model_y_min)
+                        else:
+                            Y_true_model = np.zeros_like(y_vals, dtype=float)
+                    else:
+                        Y_true_model = y_vals
+                # Calcular errores donde haya valores válidos
+                mask = np.isfinite(Y_true_model)
+                if np.any(mask):
+                    errors = Y_true_model[mask] - Y_pred[mask]
+                    error_general = np.mean(np.abs(errors))
+
+            # Mostrar resultados en panel
+            self.results_text.delete(1.0, tk.END)
+            self.results_text.insert(tk.END, "APLICACIÓN DE MODELO CARGADO (sin reentrenar)\n")
+            self.results_text.insert(tk.END, "="*60 + "\n\n")
+
+            # Si el modelo es de clasificación, estimar etiqueta
+            if self.model_target_mapping:
+                # Si estaba normalizado Y, desnormalizar primero
+                if self.model_is_normalized and self.model_y_min is not None and self.model_y_max is not None:
+                    Y_pred_codes = Y_pred * (self.model_y_max - self.model_y_min) + self.model_y_min
+                else:
+                    Y_pred_codes = Y_pred
+                Y_pred_labels = []
+                for v in np.rint(Y_pred_codes).astype(int):
+                    Y_pred_labels.append(self.model_target_mapping.get(v, f"cls_{v}"))
+                self.results_text.insert(tk.END, "Predicciones de clase (aprox):\n")
+                for i, lbl in enumerate(Y_pred_labels[:50]):
+                    self.results_text.insert(tk.END, f"  {i+1}: {lbl}\n")
+                if len(Y_pred_labels) > 50:
+                    self.results_text.insert(tk.END, f"  ... ({len(Y_pred_labels)} total)\n")
+
+            if errors is not None:
+                self.results_text.insert(tk.END, "\nResumen de error (si había Y en el dataset):\n")
+                self.results_text.insert(tk.END, f"  EG = {error_general:.4f}\n")
+
+            # Actualizar gráficas con Y disponible si procede (limitado a primeros N si muy grande)
+            if errors is not None:
+                n = min(200, len(Y_pred))
+                patterns = np.arange(1, n + 1)
+                self.ax1.clear()
+                self.ax2.clear()
+                self.ax1.plot(patterns, Y_true_model[:n], 'o-', label='YD (Deseada, escala modelo)',
+                              color='#3498db', linewidth=2, markersize=6)
+                self.ax1.plot(patterns, Y_pred[:n], 's-', label='YR (Red, escala modelo)',
+                              color='#e74c3c', linewidth=2, markersize=6)
+                self.ax1.set_title('Predicción con modelo cargado')
+                self.ax1.legend()
+                self.ax1.grid(True, alpha=0.3)
+
+                err_abs = np.abs(errors[:n])
+                self.ax2.bar(patterns, err_abs, color='#9b59b6', alpha=0.7)
+                self.ax2.axhline(y=np.mean(err_abs), color='#f39c12', linestyle='--', label='EG')
+                self.ax2.legend()
+                self.ax2.grid(True, alpha=0.3)
+                self.canvas1.draw()
+                self.canvas2.draw()
+            else:
+                # Si no hay Y para comparar, solo informar cantidad de predicciones
+                self.results_text.insert(tk.END, f"Se generaron {len(Y_pred)} predicciones.\n")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo aplicar el modelo:\n{str(e)}")
     
     def load_example_data(self):
         """Carga los datos de ejemplo del problema"""
