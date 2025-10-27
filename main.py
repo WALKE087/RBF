@@ -5,10 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-
 class RBF_Network:
-    """Red Neuronal de Funciones de Base Radial (RBF)"""
-    
     def __init__(self):
         self.X_train = None
         self.Y_train = None
@@ -17,56 +14,37 @@ class RBF_Network:
         self.weights = None
         self.error_optimo = 0.1
         self.training_history = []
-        
+
     def rbf_activation(self, distance):
-        """Función de Activación RBF: FA = Ω² * ln(Ω)"""
         if distance == 0:
             return 0
         return (distance ** 2) * np.log(distance)
-    
+
     def euclidean_distance(self, x, center):
-        """Calcula la distancia euclidiana entre un vector y un centro"""
         return np.sqrt(np.sum((x - center) ** 2))
-    
+
     def initialize_centers(self, X):
-        """Inicializa los centros radiales aleatoriamente entre min y max de los datos"""
         min_vals = np.min(X, axis=0)
         max_vals = np.max(X, axis=0)
-        
         self.centers = np.random.uniform(min_vals, max_vals, (self.num_centers, X.shape[1]))
         return self.centers
-    
+
     def train(self, X, Y, num_centers, error_optimo):
-        """Entrena la red RBF"""
         self.X_train = X
         self.Y_train = Y
         self.num_centers = num_centers
         self.error_optimo = error_optimo
-        
-        # Inicializar centros radiales
         self.initialize_centers(X)
-        
-        # Construir matriz de interpolación A
         num_patterns = X.shape[0]
-        A = np.ones((num_patterns, num_centers + 1))  # +1 para el bias W0
-        
-        # Calcular distancias y aplicar función de activación
+        A = np.ones((num_patterns, num_centers + 1))
         for i in range(num_patterns):
             for j in range(num_centers):
                 distance = self.euclidean_distance(X[i], self.centers[j])
                 A[i, j + 1] = self.rbf_activation(distance)
-        
-        # Resolver el sistema A * W = Y usando mínimos cuadrados
         self.weights = np.linalg.lstsq(A, Y, rcond=None)[0]
-        
-        # Calcular salidas de la red
         Y_pred = A.dot(self.weights)
-        
-        # Calcular errores
         errors = Y - Y_pred
         error_general = np.mean(np.abs(errors))
-        
-        # Guardar historial
         self.training_history.append({
             'num_centers': num_centers,
             'centers': self.centers.copy(),
@@ -76,22 +54,17 @@ class RBF_Network:
             'error_general': error_general,
             'A_matrix': A.copy()
         })
-        
         return Y_pred, errors, error_general, A
-    
+
     def predict(self, X):
-        """Realiza predicciones con la red entrenada"""
         if self.weights is None:
             raise ValueError("La red no ha sido entrenada")
-        
         num_patterns = X.shape[0]
         A = np.ones((num_patterns, self.num_centers + 1))
-        
         for i in range(num_patterns):
             for j in range(self.num_centers):
                 distance = self.euclidean_distance(X[i], self.centers[j])
                 A[i, j + 1] = self.rbf_activation(distance)
-        
         return A.dot(self.weights)
 
 
@@ -113,6 +86,8 @@ class RBF_GUI:
         self.is_normalized = False
         self.data_min = None
         self.data_max = None
+        self.feature_names = None     # Nombres de columnas (incluye one-hot)
+        self.target_mapping = None    # Mapeo de clases si Y es categórica
         
         # Crear interfaz
         self.create_widgets()
@@ -121,29 +96,37 @@ class RBF_GUI:
         self.load_example_data()
     
     def create_widgets(self):
-        # Frame principal dividido en izquierda y derecha
         main_frame = tk.Frame(self.root, bg='#f0f0f0')
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        # Panel izquierdo - Controles y datos
-        left_frame = tk.Frame(main_frame, bg='#f0f0f0')
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        # Panel derecho - Gráficas
+        left_frame = tk.Frame(main_frame, bg='#f0f0f0', width=520)
+        # Mantener ancho fijo para evitar que la tabla aplaste las gráficas
+        left_frame.pack_propagate(False)
+        left_frame.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 5))
         right_frame = tk.Frame(main_frame, bg='#f0f0f0')
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
         # ===== PANEL IZQUIERDO =====
-        # Título
         title_label = tk.Label(left_frame, text="RED NEURONAL RBF", 
                               font=('Arial', 16, 'bold'), bg='#f0f0f0', fg='#2c3e50')
         title_label.pack(pady=(0, 10))
-        # Frame de datos de entrada
         data_frame = tk.LabelFrame(left_frame, text="Datos de Entrada", 
                                    font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=10, pady=10)
         data_frame.pack(fill=tk.BOTH, expand=False, pady=(0, 10))
-        # Inicializar tabla de datos (columnas se ajustan dinámicamente)
-        self.tree = ttk.Treeview(data_frame, show='headings', height=5)
-        self.tree.pack(fill=tk.BOTH, expand=True)
+        # Contenedor para Treeview con scrollbars
+        tree_container = tk.Frame(data_frame, bg='#f0f0f0')
+        tree_container.pack(fill=tk.BOTH, expand=True)
+
+        self.tree = ttk.Treeview(tree_container, show='headings', height=8)
+        vsb = ttk.Scrollbar(tree_container, orient='vertical', command=self.tree.yview)
+        hsb = ttk.Scrollbar(tree_container, orient='horizontal', command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        # Distribución con grid dentro del contenedor
+        tree_container.rowconfigure(0, weight=1)
+        tree_container.columnconfigure(0, weight=1)
+        self.tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
         
-        # Botones de datos
         btn_frame = tk.Frame(data_frame, bg='#f0f0f0')
         btn_frame.pack(fill=tk.X, pady=(5, 0))
         
@@ -170,8 +153,11 @@ class RBF_GUI:
         tk.Label(config_frame, text="Número de Centros Radiales:", 
                 bg='#f0f0f0', font=('Arial', 9)).grid(row=1, column=0, sticky='w', pady=5)
         self.num_centers_var = tk.IntVar(value=2)
-        tk.Spinbox(config_frame, from_=1, to=10, textvariable=self.num_centers_var,
-                  width=10, font=('Arial', 9)).grid(row=1, column=1, sticky='w', padx=(10, 0))
+        self.centers_spin = tk.Spinbox(
+            config_frame, from_=1, to=10, textvariable=self.num_centers_var,
+            width=10, font=('Arial', 9)
+        )
+        self.centers_spin.grid(row=1, column=1, sticky='w', padx=(10, 0))
         
         # Error de aproximación óptimo
         tk.Label(config_frame, text="Error de Aproximación Óptimo:", 
@@ -281,7 +267,10 @@ class RBF_GUI:
             return
         n_inputs = self.X_data.shape[1]
         # Definir nombres de columnas dinámicamente
-        columns = [f"X{i+1}" for i in range(n_inputs)] + ["YD"]
+        if self.feature_names is not None and len(self.feature_names) == n_inputs:
+            columns = list(self.feature_names) + ["YD"]
+        else:
+            columns = [f"X{i+1}" for i in range(n_inputs)] + ["YD"]
         self.tree['columns'] = columns
         for col in columns:
             if col == "YD":
@@ -295,7 +284,7 @@ class RBF_GUI:
             self.tree.insert('', 'end', values=row)
     
     def load_dataset(self):
-        """Carga un dataset desde archivo"""
+        """Carga un dataset desde archivo con soporte de variables categóricas (one-hot para X, codificación para Y)."""
         import pandas as pd
         file_path = filedialog.askopenfilename(
             title="Seleccionar Dataset",
@@ -328,13 +317,23 @@ class RBF_GUI:
                 messagebox.showerror("Error", "El dataset debe tener al menos 2 columnas (entradas y salida)")
                 return
 
-            # Seleccionar solo columnas numéricas para X
-            X = df.select_dtypes(include=[float, int]).to_numpy()
-            # Si la última columna es la salida y es no numérica, convertirla a códigos
-            if not pd.api.types.is_numeric_dtype(df.iloc[:, -1]):
-                Y = df.iloc[:, -1].astype('category').cat.codes.to_numpy()
+            # Separar características (todas menos la última) y objetivo (última)
+            X_df = df.iloc[:, :-1]
+            y_series = df.iloc[:, -1]
+
+            # One-hot encoding para columnas no numéricas en X (mantiene numéricas tal cual)
+            X_processed = pd.get_dummies(X_df, drop_first=False)
+            self.feature_names = list(X_processed.columns)
+            X = X_processed.to_numpy(dtype=float)
+
+            # Y: si no es numérica, codificar a enteros (etiquetas)
+            if not pd.api.types.is_numeric_dtype(y_series):
+                y_cat = y_series.astype('category')
+                self.target_mapping = dict(enumerate(y_cat.cat.categories))
+                Y = y_cat.cat.codes.to_numpy(dtype=float)
             else:
-                Y = df.iloc[:, -1].to_numpy(dtype=float)
+                self.target_mapping = None
+                Y = y_series.to_numpy(dtype=float)
 
             # Guardar originales
             self.X_data_original = X.copy()
@@ -348,22 +347,27 @@ class RBF_GUI:
                 self.Y_data = Y
                 self.is_normalized = False
 
-            # Ajustar el mínimo de centros radiales
-            min_centers = self.X_data.shape[1]
-            self.num_centers_var.set(min_centers)
-            # Actualizar el Spinbox para reflejar el nuevo mínimo
-            for widget in self.root.winfo_children():
-                for child in widget.winfo_children():
-                    if isinstance(child, tk.Spinbox):
-                        child.config(from_=min_centers)
+            # Configurar Spinbox de centros radiales (1 .. N patrones)
+            max_centers = max(1, len(self.X_data))
+            try:
+                self.centers_spin.config(from_=1, to=max_centers)
+            except Exception:
+                pass
+            # Mantener un valor por defecto razonable
+            self.num_centers_var.set(min(self.num_centers_var.get(), max_centers))
 
             self.update_table()
             self.results_text.delete(1.0, tk.END)
             self.results_text.insert(tk.END, f"✓ Dataset cargado exitosamente\n")
             self.results_text.insert(tk.END, f"  Patrones: {len(self.X_data)}\n")
-            self.results_text.insert(tk.END, f"  Entradas: {self.X_data.shape[1]}\n")
+            self.results_text.insert(tk.END, f"  Entradas (tras encoding): {self.X_data.shape[1]}\n")
             self.results_text.insert(tk.END, f"  Salidas: 1\n")
-            self.results_text.insert(tk.END, f"  Normalizado: {'SÍ' if self.is_normalized else 'NO'}\n\n")
+            self.results_text.insert(tk.END, f"  Normalizado: {'SÍ' if self.is_normalized else 'NO'}\n")
+            if self.target_mapping is not None:
+                self.results_text.insert(tk.END, "  Mapeo de clases Y (categórica):\n")
+                for k, v in self.target_mapping.items():
+                    self.results_text.insert(tk.END, f"    {k} -> {v}\n")
+            self.results_text.insert(tk.END, "\n")
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar el archivo:\n{str(e)}")
     
@@ -381,6 +385,8 @@ class RBF_GUI:
         # Guardar como originales
         self.X_data_original = X.copy()
         self.Y_data_original = Y.copy()
+        self.feature_names = ["X1", "X2"]
+        self.target_mapping = None
         
         # Aplicar normalización si está activada
         if self.normalize_var.get():
@@ -392,6 +398,13 @@ class RBF_GUI:
         
         # Actualizar tabla
         self.update_table()
+        # Ajustar Spinbox de centros
+        max_centers = max(1, len(self.X_data))
+        try:
+            self.centers_spin.config(from_=1, to=max_centers)
+        except Exception:
+            pass
+        self.num_centers_var.set(min(self.num_centers_var.get(), max_centers))
         
         self.results_text.delete(1.0, tk.END)
         self.results_text.insert(tk.END, "✓ Datos de ejemplo cargados exitosamente\n")
@@ -419,10 +432,11 @@ class RBF_GUI:
         y_to_show = self.Y_data_original if self.Y_data_original is not None else self.Y_data
         
         if data_to_show is not None:
-            text_area.insert(tk.END, "# Formato: X1 X2 YD (un patrón por línea)\n")
+            text_area.insert(tk.END, "# Formato: X1 X2 ... Xn YD (un patrón por línea)\n")
             text_area.insert(tk.END, "# Los datos se muestran sin normalizar\n")
             for i in range(len(data_to_show)):
-                text_area.insert(tk.END, f"{data_to_show[i, 0]} {data_to_show[i, 1]} {y_to_show[i]}\n")
+                xs = " ".join(str(v) for v in data_to_show[i])
+                text_area.insert(tk.END, f"{xs} {y_to_show[i]}\n")
         
         def save_data():
             try:
@@ -468,10 +482,9 @@ class RBF_GUI:
         if self.X_data is None or self.Y_data is None:
             messagebox.showerror("Error", "No hay datos cargados")
             return
-        num_inputs = self.X_data.shape[1]
         num_centers = self.num_centers_var.get()
-        if num_centers < num_inputs:
-            messagebox.showerror("Error", f"El número de centros radiales no puede ser menor al número de entradas ({num_inputs}).")
+        if num_centers < 1:
+            messagebox.showerror("Error", "El número de centros radiales debe ser al menos 1.")
             return
         # Particionar datos 80/20
         n = len(self.X_data)
@@ -503,7 +516,10 @@ class RBF_GUI:
         # Mostrar centros radiales
         self.results_text.insert(tk.END, f"CENTROS RADIALES INICIALIZADOS:\n")
         for i, center in enumerate(self.rbf.centers):
-            self.results_text.insert(tk.END, f"  R{i+1} = ({center[0]:.4f}, {center[1]:.4f})\n")
+            preview = ", ".join([f"{c:.4f}" for c in center[:min(3, len(center))]])
+            if len(center) > 3:
+                preview += ", ..."
+            self.results_text.insert(tk.END, f"  R{i+1} = ({preview})\n")
         self.results_text.insert(tk.END, "\n")
         # Mostrar pesos
         self.results_text.insert(tk.END, f"PESOS CALCULADOS (W = A\\Y):\n")
