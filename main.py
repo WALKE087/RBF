@@ -124,37 +124,23 @@ class RBF_GUI:
         # Frame principal dividido en izquierda y derecha
         main_frame = tk.Frame(self.root, bg='#f0f0f0')
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
         # Panel izquierdo - Controles y datos
         left_frame = tk.Frame(main_frame, bg='#f0f0f0')
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        
         # Panel derecho - Gráficas
         right_frame = tk.Frame(main_frame, bg='#f0f0f0')
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
-        
         # ===== PANEL IZQUIERDO =====
-        
         # Título
         title_label = tk.Label(left_frame, text="RED NEURONAL RBF", 
                               font=('Arial', 16, 'bold'), bg='#f0f0f0', fg='#2c3e50')
         title_label.pack(pady=(0, 10))
-        
         # Frame de datos de entrada
         data_frame = tk.LabelFrame(left_frame, text="Datos de Entrada", 
                                    font=('Arial', 10, 'bold'), bg='#f0f0f0', padx=10, pady=10)
         data_frame.pack(fill=tk.BOTH, expand=False, pady=(0, 10))
-        
-        # Tabla de datos
-        self.tree = ttk.Treeview(data_frame, columns=('X1', 'X2', 'YD'), 
-                                show='headings', height=5)
-        self.tree.heading('X1', text='X1')
-        self.tree.heading('X2', text='X2')
-        self.tree.heading('YD', text='YD (Deseada)')
-        
-        for col in ('X1', 'X2', 'YD'):
-            self.tree.column(col, width=100, anchor='center')
-        
+        # Inicializar tabla de datos (columnas se ajustan dinámicamente)
+        self.tree = ttk.Treeview(data_frame, show='headings', height=5)
         self.tree.pack(fill=tk.BOTH, expand=True)
         
         # Botones de datos
@@ -285,14 +271,28 @@ class RBF_GUI:
                 self.results_text.insert(tk.END, "\n✓ Usando datos originales (sin normalizar)\n")
     
     def update_table(self):
-        """Actualiza la tabla con los datos actuales"""
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        
+        """Actualiza la tabla con los datos actuales y ajusta las columnas dinámicamente"""
+        # Limpiar columnas y filas
+        for col in self.tree['columns']:
+            self.tree.heading(col, text='')
+        self.tree['columns'] = ()
+        self.tree.delete(*self.tree.get_children())
+        if self.X_data is None or self.Y_data is None:
+            return
+        n_inputs = self.X_data.shape[1]
+        # Definir nombres de columnas dinámicamente
+        columns = [f"X{i+1}" for i in range(n_inputs)] + ["YD"]
+        self.tree['columns'] = columns
+        for col in columns:
+            if col == "YD":
+                self.tree.heading(col, text="YD (Deseada)")
+            else:
+                self.tree.heading(col, text=col)
+            self.tree.column(col, width=100, anchor='center')
+        # Insertar datos
         for i in range(len(self.X_data)):
-            self.tree.insert('', 'end', values=(f"{self.X_data[i, 0]:.4f}", 
-                                               f"{self.X_data[i, 1]:.4f}", 
-                                               f"{self.Y_data[i]:.4f}"))
+            row = [f"{self.X_data[i, j]:.4f}" for j in range(n_inputs)] + [f"{self.Y_data[i]:.4f}"]
+            self.tree.insert('', 'end', values=row)
     
     def load_dataset(self):
         """Carga un dataset desde archivo"""
@@ -464,7 +464,7 @@ class RBF_GUI:
                  bg='#27ae60', fg='white', font=('Arial', 10, 'bold')).pack(pady=5)
     
     def train_network(self):
-        """Entrena la red neuronal RBF"""
+        """Entrena la red neuronal RBF con 80% de los datos y prueba con 20%"""
         if self.X_data is None or self.Y_data is None:
             messagebox.showerror("Error", "No hay datos cargados")
             return
@@ -473,126 +473,113 @@ class RBF_GUI:
         if num_centers < num_inputs:
             messagebox.showerror("Error", f"El número de centros radiales no puede ser menor al número de entradas ({num_inputs}).")
             return
+        # Particionar datos 80/20
+        n = len(self.X_data)
+        idx = np.arange(n)
+        np.random.shuffle(idx)
+        split = int(n * 0.8)
+        train_idx, test_idx = idx[:split], idx[split:]
+        X_train, Y_train = self.X_data[train_idx], self.Y_data[train_idx]
+        X_test, Y_test = self.X_data[test_idx], self.Y_data[test_idx]
         # Limpiar resultados anteriores
         self.results_text.delete(1.0, tk.END)
-        # Obtener parámetros
         error_optimo = self.error_optimo_var.get()
-        # Entrenar
         self.results_text.insert(tk.END, "="*60 + "\n")
-        self.results_text.insert(tk.END, "ENTRENAMIENTO DE RED NEURONAL RBF\n")
+        self.results_text.insert(tk.END, "ENTRENAMIENTO DE RED NEURONAL RBF (80% train, 20% test)\n")
         self.results_text.insert(tk.END, "="*60 + "\n\n")
         self.results_text.insert(tk.END, f"DATOS:\n")
-        self.results_text.insert(tk.END, f"  • Patrones de entrenamiento: {len(self.X_data)}\n")
+        self.results_text.insert(tk.END, f"  • Patrones totales: {n}\n")
+        self.results_text.insert(tk.END, f"  • Patrones de entrenamiento: {len(X_train)}\n")
+        self.results_text.insert(tk.END, f"  • Patrones de prueba: {len(X_test)}\n")
         self.results_text.insert(tk.END, f"  • Datos normalizados: {'SÍ (Min-Max 0-1)' if self.is_normalized else 'NO (datos originales)'}\n\n")
         self.results_text.insert(tk.END, f"CONFIGURACIÓN:\n")
         self.results_text.insert(tk.END, f"  • Número de centros radiales: {num_centers}\n")
         self.results_text.insert(tk.END, f"  • Error de aproximación óptimo: {error_optimo}\n")
         self.results_text.insert(tk.END, f"  • Función de activación: FA = Ω² * ln(Ω)\n\n")
-        # Entrenar la red
-        Y_pred, errors, error_general, A_matrix = self.rbf.train(
-            self.X_data, self.Y_data, num_centers, error_optimo
+        # Entrenar la red SOLO con train
+        Y_pred_train, errors_train, error_general_train, A_matrix = self.rbf.train(
+            X_train, Y_train, num_centers, error_optimo
         )
-        
         # Mostrar centros radiales
         self.results_text.insert(tk.END, f"CENTROS RADIALES INICIALIZADOS:\n")
         for i, center in enumerate(self.rbf.centers):
             self.results_text.insert(tk.END, f"  R{i+1} = ({center[0]:.4f}, {center[1]:.4f})\n")
         self.results_text.insert(tk.END, "\n")
-        
-        # Mostrar cálculo de distancias y activaciones
-        self.results_text.insert(tk.END, f"CÁLCULO DE DISTANCIAS EUCLIDIANAS Y ACTIVACIONES:\n")
-        self.results_text.insert(tk.END, "-"*60 + "\n")
-        
-        for i in range(len(self.X_data)):
-            self.results_text.insert(tk.END, f"Patrón {i+1}: X = ({self.X_data[i, 0]:.2f}, {self.X_data[i, 1]:.2f}), YD = {self.Y_data[i]:.2f}\n")
-            for j in range(num_centers):
-                dist = self.rbf.euclidean_distance(self.X_data[i], self.rbf.centers[j])
-                activation = self.rbf.rbf_activation(dist)
-                self.results_text.insert(tk.END, 
-                    f"  D{j+1}{i+1} = {dist:.4f} → FA(D{j+1}{i+1}) = {activation:.4f}\n")
-            self.results_text.insert(tk.END, "\n")
-        
-        # Mostrar matriz de interpolación
-        self.results_text.insert(tk.END, f"MATRIZ DE INTERPOLACIÓN A:\n")
-        self.results_text.insert(tk.END, "-"*60 + "\n")
-        for row in A_matrix:
-            self.results_text.insert(tk.END, "  " + "  ".join([f"{val:8.4f}" for val in row]) + "\n")
-        self.results_text.insert(tk.END, "\n")
-        
         # Mostrar pesos
         self.results_text.insert(tk.END, f"PESOS CALCULADOS (W = A\\Y):\n")
         for i, weight in enumerate(self.rbf.weights):
             self.results_text.insert(tk.END, f"  W{i} = {weight:.4f}\n")
         self.results_text.insert(tk.END, "\n")
-        
-        # Mostrar resultados
-        self.results_text.insert(tk.END, f"SIMULACIÓN - SALIDAS DE LA RED:\n")
+        # Mostrar resultados de entrenamiento
+        self.results_text.insert(tk.END, f"RESULTADOS SOBRE DATOS DE ENTRENAMIENTO:\n")
         self.results_text.insert(tk.END, "-"*60 + "\n")
         self.results_text.insert(tk.END, "Patrón    YD       YR       Error    |Error|\n")
         self.results_text.insert(tk.END, "-"*60 + "\n")
-        
-        for i in range(len(self.Y_data)):
+        for i in range(len(Y_train)):
             self.results_text.insert(tk.END, 
-                f"  {i+1}      {self.Y_data[i]:.4f}   {Y_pred[i]:.4f}   {errors[i]:7.4f}  {abs(errors[i]):.4f}\n")
-        
+                f"  {i+1}      {Y_train[i]:.4f}   {Y_pred_train[i]:.4f}   {errors_train[i]:7.4f}  {abs(errors_train[i]):.4f}\n")
         self.results_text.insert(tk.END, "\n")
-        self.results_text.insert(tk.END, f"ERROR GENERAL (EG): {error_general:.4f}\n")
-        self.results_text.insert(tk.END, f"ERROR ÓPTIMO:       {error_optimo:.4f}\n\n")
-        
-        # Verificar convergencia
-        if error_general <= error_optimo:
+        self.results_text.insert(tk.END, f"ERROR GENERAL (EG) TRAIN: {error_general_train:.4f}\n")
+        self.results_text.insert(tk.END, f"ERROR ÓPTIMO:             {error_optimo:.4f}\n\n")
+        # Verificar convergencia en entrenamiento
+        if error_general_train <= error_optimo:
             self.results_text.insert(tk.END, "✓ LA RED CONVERGE (EG ≤ Error Óptimo)\n", 'success')
             self.results_text.tag_config('success', foreground='green', font=('Courier', 9, 'bold'))
+            # Prueba sobre test SOLO si converge
+            if len(X_test) > 0:
+                Y_pred_test = self.rbf.predict(X_test)
+                errors_test = Y_test - Y_pred_test
+                error_general_test = np.mean(np.abs(errors_test))
+                threshold = 0.5
+                error_rate = np.mean(np.abs(errors_test) > threshold) * 100 if len(errors_test) > 0 else 0
+                self.results_text.insert(tk.END, f"RESULTADOS SOBRE DATOS DE PRUEBA:\n")
+                self.results_text.insert(tk.END, "-"*60 + "\n")
+                self.results_text.insert(tk.END, "Patrón    YD       YR       Error    |Error|\n")
+                self.results_text.insert(tk.END, "-"*60 + "\n")
+                for i in range(len(Y_test)):
+                    self.results_text.insert(tk.END, 
+                        f"  {i+1}      {Y_test[i]:.4f}   {Y_pred_test[i]:.4f}   {errors_test[i]:7.4f}  {abs(errors_test[i]):.4f}\n")
+                self.results_text.insert(tk.END, "\n")
+                self.results_text.insert(tk.END, f"ERROR GENERAL (EG) TEST: {error_general_test:.4f}\n")
+                self.results_text.insert(tk.END, f"TASA DE ERROR (>|{threshold}|): {error_rate:.2f}%\n")
+            else:
+                self.results_text.insert(tk.END, "No hay suficientes datos para prueba (test set vacío).\n")
         else:
             self.results_text.insert(tk.END, "✗ LA RED NO CONVERGE (EG > Error Óptimo)\n", 'warning')
             self.results_text.insert(tk.END, "  Sugerencia: Aumentar el número de centros radiales\n", 'warning')
             self.results_text.tag_config('warning', foreground='red', font=('Courier', 9, 'bold'))
-        
-        # Actualizar gráficas
-        self.update_graphs(Y_pred, errors, error_general, error_optimo)
+            self.results_text.insert(tk.END, "\nNo se realiza prueba sobre datos de test porque la red no converge.\n")
+        # Actualizar gráficas solo con train
+        self.update_graphs(Y_pred_train, errors_train, error_general_train, error_optimo)
     
     def update_graphs(self, Y_pred, errors, error_general, error_optimo):
-        """Actualiza las gráficas con los resultados"""
-        
-        # Gráfica 1: YD vs YR
+        """Actualiza las gráficas con los resultados de entrenamiento (train)"""
+        # Solo graficar los datos de entrenamiento (Y_pred y errors)
+        n = len(Y_pred)
+        patterns = np.arange(1, n + 1)
         self.ax1.clear()
-        patterns = np.arange(1, len(self.Y_data) + 1)
-        
-        self.ax1.plot(patterns, self.Y_data, 'o-', label='YD (Deseada)', 
+        self.ax1.plot(patterns, self.rbf.Y_train, 'o-', label='YD (Deseada)', 
                      color='#3498db', linewidth=2, markersize=8)
         self.ax1.plot(patterns, Y_pred, 's-', label='YR (Red)', 
                      color='#e74c3c', linewidth=2, markersize=8)
-        
         self.ax1.set_xlabel('Patrón', fontsize=10, fontweight='bold')
         self.ax1.set_ylabel('Salida', fontsize=10, fontweight='bold')
-        self.ax1.set_title('Salidas Deseadas vs Salidas de la Red', 
+        self.ax1.set_title('Salidas Deseadas vs Salidas de la Red (Train)', 
                           fontsize=11, fontweight='bold')
         self.ax1.legend(loc='best', fontsize=9)
         self.ax1.grid(True, alpha=0.3)
         self.ax1.set_xticks(patterns)
         self.fig1.tight_layout()
         self.canvas1.draw()
-        
         # Gráfica 2: Errores
         self.ax2.clear()
-        
-        # Barras de error por patrón
-        colors = ['#e74c3c' if abs(e) > error_optimo/len(self.Y_data) else '#27ae60' 
-                 for e in errors]
-        self.ax2.bar(patterns, np.abs(errors), color=colors, alpha=0.7, 
-                    label='|Error| por patrón')
-        
-        # Línea de error general
-        self.ax2.axhline(y=error_general, color='#3498db', linestyle='--', 
-                        linewidth=2, label=f'EG = {error_general:.4f}')
-        
-        # Línea de error óptimo
-        self.ax2.axhline(y=error_optimo, color='#f39c12', linestyle='--', 
-                        linewidth=2, label=f'Error Óptimo = {error_optimo:.4f}')
-        
+        colors = ['#e74c3c' if abs(e) > error_optimo/n else '#27ae60' for e in errors]
+        self.ax2.bar(patterns, np.abs(errors), color=colors, alpha=0.7, label='|Error| por patrón')
+        self.ax2.axhline(y=error_general, color='#3498db', linestyle='--', linewidth=2, label=f'EG = {error_general:.4f}')
+        self.ax2.axhline(y=error_optimo, color='#f39c12', linestyle='--', linewidth=2, label=f'Error Óptimo = {error_optimo:.4f}')
         self.ax2.set_xlabel('Patrón', fontsize=10, fontweight='bold')
         self.ax2.set_ylabel('Error', fontsize=10, fontweight='bold')
-        self.ax2.set_title('Análisis de Errores', fontsize=11, fontweight='bold')
+        self.ax2.set_title('Análisis de Errores (Train)', fontsize=11, fontweight='bold')
         self.ax2.legend(loc='best', fontsize=9)
         self.ax2.grid(True, alpha=0.3)
         self.ax2.set_xticks(patterns)
