@@ -3,9 +3,11 @@ from matplotlib.figure import Figure
 
 # Funciones para graficar resultados y errores
 
-def plot_train_results(ax1, ax2, Y_train, Y_pred, errors, error_general, error_optimo):
+def plot_train_results(ax1, ax2, ax3, Y_train, Y_pred, errors, error_general, error_optimo):
     n = len(Y_pred)
     patterns = np.arange(1, n + 1)
+    
+    # Gráfica 1: YD vs YR
     ax1.clear()
     ax1.plot(patterns, Y_train, 'o-', label='YD (Deseada)', color='#3498db', linewidth=2, markersize=8)
     ax1.plot(patterns, Y_pred, 's-', label='YR (Red)', color='#e74c3c', linewidth=2, markersize=8)
@@ -17,6 +19,7 @@ def plot_train_results(ax1, ax2, Y_train, Y_pred, errors, error_general, error_o
     ax1.set_xticks(patterns)
     ax1.figure.tight_layout()
     ax1.figure.canvas.draw()
+    
     # Gráfica 2: Errores
     ax2.clear()
     colors = ['#e74c3c' if abs(e) > error_optimo/n else '#27ae60' for e in errors]
@@ -31,3 +34,21 @@ def plot_train_results(ax1, ax2, Y_train, Y_pred, errors, error_general, error_o
     ax2.set_xticks(patterns)
     ax2.figure.tight_layout()
     ax2.figure.canvas.draw()
+    
+    # Gráfica 3: Dispersión Yd vs Yr (puntos deben alinearse sobre diagonal)
+    ax3.clear()
+    ax3.scatter(Y_train, Y_pred, color='#3498db', s=100, alpha=0.6, edgecolors='black', linewidth=1.5, label='Predicciones')
+    
+    # Línea diagonal ideal (donde Yd = Yr perfectamente)
+    min_val = min(Y_train.min(), Y_pred.min())
+    max_val = max(Y_train.max(), Y_pred.max())
+    ax3.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Ideal (Yd = Yr)')
+    
+    ax3.set_xlabel('YD (Salida Deseada)', fontsize=10, fontweight='bold')
+    ax3.set_ylabel('YR (Salida Predicha)', fontsize=10, fontweight='bold')
+    ax3.set_title('Dispersión: Predicciones vs Valores Reales', fontsize=11, fontweight='bold')
+    ax3.legend(loc='best', fontsize=9)
+    ax3.grid(True, alpha=0.3)
+    ax3.figure.tight_layout()
+    ax3.figure.canvas.draw()
+

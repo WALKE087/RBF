@@ -1,4 +1,6 @@
 import os
+import json
+from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import numpy as np
@@ -527,7 +529,7 @@ class RBF_GUI:
                 else:
                     messagebox.showerror("Google Drive", f"Tipo de archivo no soportado: {name}")
                     return
-                self._process_loaded_dataframe(df, source_hint=f"Drive: {name}")
+                self._process_dataset(df, source_hint=f"Drive: {name}")
                 picker.destroy()
             except Exception as e:
                 messagebox.showerror("Google Drive", f"Error al leer el archivo seleccionado:\n{e}")
@@ -538,10 +540,12 @@ class RBF_GUI:
         tk.Button(btns, text="Descargar y Cargar", command=on_open,
                   bg='#2ecc71', fg='white').pack(side=tk.RIGHT, padx=5)
 
-    def _process_loaded_dataframe(self, df, source_hint=""):
+    def _process_dataset(self, df, source_hint=""):
+        """Función auxiliar para procesar un DataFrame y cargarlo en la aplicación"""
         if df.shape[1] < 2:
-            messagebox.showerror("Error", "El dataset debe tener al menos 2 columnas (entradas y salida).")
+            messagebox.showerror("Error", "El dataset debe tener al menos 2 columnas (entradas y salida)")
             return
+        
         X_df = df.iloc[:, :-1]
         y_series = df.iloc[:, -1]
         X_processed, self.feature_names = one_hot_encode_X(X_df)
@@ -564,6 +568,10 @@ class RBF_GUI:
         current = self.num_centers_var.get()
         self.num_centers_var.set(min(max_centers, max(current, min_centers)))
         self.update_table()
+        
+        if not source_hint:
+            source_hint = "local"
+        
         self.results_text.delete(1.0, tk.END)
         self.results_text.insert(tk.END, f"✓ Dataset cargado exitosamente ({source_hint})\n")
         self.results_text.insert(tk.END, f"  Patrones: {len(self.X_data)}\n")
@@ -575,48 +583,90 @@ class RBF_GUI:
             for k, v in self.target_mapping.items():
                 self.results_text.insert(tk.END, f"    {k} -> {v}\n")
         self.results_text.insert(tk.END, "\n")
+    
     def load_dataset(self):
         import pandas as pd
         from data.loader import load_local_dataset
         df = load_local_dataset()
         if df is None:
             return
-        if df.shape[1] < 2:
-            messagebox.showerror("Error", "El dataset debe tener al menos 2 columnas (entradas y salida)")
+        self._process_dataset(df, source_hint="local")
+    
+    def download_from_url(self):
+        """Descargar dataset desde una URL proporcionada por el usuario"""
+        import urllib.request
+        import hashlib
+        from tkinter import simpledialog
+        
+        # Solicitar URL
+        url = simpledialog.askstring("Descargar Dataset", 
+                                     "Ingrese la URL del dataset:",
+                                     parent=self.root)
+        if not url:
             return
-        X_df = df.iloc[:, :-1]
-        y_series = df.iloc[:, -1]
-        X_processed, self.feature_names = one_hot_encode_X(X_df)
-        self.X_processed_df = X_processed.copy()
-        X = X_processed.to_numpy(dtype=float)
-        Y, self.target_mapping = label_encode_Y(y_series)
-        self.y_series_loaded = y_series.copy()
-        self.X_data_original = X.copy()
-        self.Y_data_original = Y.copy()
-        # Los datos se cargan sin normalizar, usar preprocesamiento para escalar
-        self.X_data = X
-        self.Y_data = Y
-        self.is_normalized = False
-        min_centers = int(self.X_data.shape[1])
-        max_centers = max(1, len(self.X_data))
+        
         try:
-            self.centers_spin.config(from_=min_centers, to=max_centers)
-        except Exception:
-            pass
-        current = self.num_centers_var.get()
-        self.num_centers_var.set(min(max_centers, max(current, min_centers)))
-        self.update_table()
-        self.results_text.delete(1.0, tk.END)
-        self.results_text.insert(tk.END, f"✓ Dataset cargado exitosamente\n")
-        self.results_text.insert(tk.END, f"  Patrones: {len(self.X_data)}\n")
-        self.results_text.insert(tk.END, f"  Entradas (tras encoding): {self.X_data.shape[1]}\n")
-        self.results_text.insert(tk.END, f"  Salidas: 1\n")
-        self.results_text.insert(tk.END, f"  Normalizado: {'SÍ' if self.is_normalized else 'NO'}\n")
-        if self.target_mapping is not None:
-            self.results_text.insert(tk.END, "  Mapeo de clases Y (categórica):\n")
-            for k, v in self.target_mapping.items():
-                self.results_text.insert(tk.END, f"    {k} -> {v}\n")
-        self.results_text.insert(tk.END, "\n")
+            self.results_text.delete(1.0, tk.END)
+            self.results_text.insert(tk.END, f"Descargando dataset desde:\n{url}\n\n")
+            self.root.update()
+            
+            # Crear carpeta temporal para descargas
+            download_dir = os.path.join(os.getcwd(), "descargas")
+            os.makedirs(download_dir, exist_ok=True)
+            
+            # Determinar nombre del archivo
+            filename = url.split('/')[-1].split('?')[0]
+            if not filename or '.' not in filename:
+                filename = "dataset_descargado.csv"
+            
+            filepath = os.path.join(download_dir, filename)
+            
+            # Descargar archivo
+            self.results_text.insert(tk.END, "Descargando archivo...\n")
+            self.root.update()
+            urllib.request.urlretrieve(url, filepath)
+            
+            # Calcular hash para verificación de integridad
+            with open(filepath, 'rb') as f:
+                file_hash = hashlib.md5(f.read()).hexdigest()
+            
+            self.results_text.insert(tk.END, f"✓ Archivo descargado: {filename}\n")
+            self.results_text.insert(tk.END, f"✓ Hash MD5: {file_hash}\n")
+            self.results_text.insert(tk.END, f"✓ Ubicación: {filepath}\n\n")
+            
+            # Detectar tipo de archivo y cargar
+            self.results_text.insert(tk.END, "Cargando dataset...\n")
+            self.root.update()
+            
+            if filepath.endswith('.csv'):
+                df = pd.read_csv(filepath)
+            elif filepath.endswith(('.xls', '.xlsx')):
+                df = pd.read_excel(filepath)
+            else:
+                messagebox.showwarning("Advertencia", 
+                    "Formato no reconocido. Intentando cargar como CSV...")
+                df = pd.read_csv(filepath)
+            
+            # Verificar que tenga datos
+            if df.empty or len(df.columns) < 2:
+                messagebox.showerror("Error", 
+                    "El dataset debe tener al menos 2 columnas (entradas y salida)")
+                return
+            
+            self.results_text.insert(tk.END, f"✓ Dataset válido detectado\n")
+            self.results_text.insert(tk.END, f"  - Filas: {len(df)}\n")
+            self.results_text.insert(tk.END, f"  - Columnas: {len(df.columns)}\n\n")
+            
+            # Procesar dataset (mismo código que load_dataset)
+            self._process_dataset(df, source_hint=f"URL: {filename}")
+            
+            messagebox.showinfo("Éxito", 
+                f"Dataset descargado y cargado exitosamente.\nHash MD5: {file_hash}")
+            
+        except Exception as e:
+            messagebox.showerror("Error al descargar", 
+                f"Error al descargar o procesar el archivo:\n{str(e)}")
+            self.results_text.insert(tk.END, f"\n❌ ERROR: {str(e)}\n")
 
     def save_model(self):
         if self.rbf.weights is None or self.rbf.centers is None:
@@ -738,8 +788,19 @@ class RBF_GUI:
             self.results_text.insert(tk.END, 
                 f"  {i+1}      {Y_train[i]:.4f}   {Y_pred_train[i]:.4f}   {errors_train[i]:7.4f}  {abs(errors_train[i]):.4f}\n")
         self.results_text.insert(tk.END, "\n")
-        self.results_text.insert(tk.END, f"ERROR GENERAL (EG) TRAIN: {error_general_train:.4f}\n")
-        self.results_text.insert(tk.END, f"ERROR ÓPTIMO:             {error_optimo:.4f}\n\n")
+        
+        # Calcular métricas de evaluación para ENTRENAMIENTO
+        mae_train = np.mean(np.abs(errors_train))  # MAE
+        rmse_train = np.sqrt(np.mean(errors_train**2))  # RMSE
+        
+        self.results_text.insert(tk.END, f"MÉTRICAS DE EVALUACIÓN - ENTRENAMIENTO:\n")
+        self.results_text.insert(tk.END, "-"*60 + "\n")
+        self.results_text.insert(tk.END, f"ERROR GENERAL (EG):                {error_general_train:.4f}\n")
+        self.results_text.insert(tk.END, f"ERROR ABSOLUTO MEDIO (MAE):        {mae_train:.4f}\n")
+        self.results_text.insert(tk.END, f"RAÍZ ERROR CUADRÁTICO MEDIO (RMSE): {rmse_train:.4f}\n")
+        self.results_text.insert(tk.END, f"ERROR ÓPTIMO:                      {error_optimo:.4f}\n")
+        self.results_text.insert(tk.END, "-"*60 + "\n\n")
+        
         if error_general_train <= error_optimo:
             self.results_text.insert(tk.END, "✓ LA RED CONVERGE (EG ≤ Error Óptimo)\n", 'success')
             self.results_text.tag_config('success', foreground='green', font=('Courier', 9, 'bold'))
@@ -747,6 +808,11 @@ class RBF_GUI:
                 Y_pred_test = self.rbf.predict(X_test)
                 errors_test = Y_test - Y_pred_test
                 error_general_test = np.mean(np.abs(errors_test))
+                
+                # Calcular métricas de evaluación para PRUEBA
+                mae_test = np.mean(np.abs(errors_test))  # MAE
+                rmse_test = np.sqrt(np.mean(errors_test**2))  # RMSE
+                
                 threshold = 0.5
                 error_rate = np.mean(np.abs(errors_test) > threshold) * 100 if len(errors_test) > 0 else 0
                 self.results_text.insert(tk.END, f"RESULTADOS SOBRE DATOS DE PRUEBA:\n")
@@ -757,8 +823,25 @@ class RBF_GUI:
                     self.results_text.insert(tk.END, 
                         f"  {i+1}      {Y_test[i]:.4f}   {Y_pred_test[i]:.4f}   {errors_test[i]:7.4f}  {abs(errors_test[i]):.4f}\n")
                 self.results_text.insert(tk.END, "\n")
-                self.results_text.insert(tk.END, f"ERROR GENERAL (EG) TEST: {error_general_test:.4f}\n")
-                self.results_text.insert(tk.END, f"TASA DE ERROR (>|{threshold}|): {error_rate:.2f}%\n")
+                
+                self.results_text.insert(tk.END, f"MÉTRICAS DE EVALUACIÓN - PRUEBA:\n")
+                self.results_text.insert(tk.END, "-"*60 + "\n")
+                self.results_text.insert(tk.END, f"ERROR GENERAL (EG):                {error_general_test:.4f}\n")
+                self.results_text.insert(tk.END, f"ERROR ABSOLUTO MEDIO (MAE):        {mae_test:.4f}\n")
+                self.results_text.insert(tk.END, f"RAÍZ ERROR CUADRÁTICO MEDIO (RMSE): {rmse_test:.4f}\n")
+                self.results_text.insert(tk.END, f"TASA DE ERROR (>|{threshold}|):     {error_rate:.2f}%\n")
+                self.results_text.insert(tk.END, "-"*60 + "\n\n")
+                
+                # Tabla resumen de métricas (según formato del documento)
+                convergencia_train = "Sí" if error_general_train <= error_optimo else "No"
+                self.results_text.insert(tk.END, "="*60 + "\n")
+                self.results_text.insert(tk.END, "TABLA RESUMEN DE MÉTRICAS\n")
+                self.results_text.insert(tk.END, "="*60 + "\n")
+                self.results_text.insert(tk.END, f"{'Conjunto':<15} {'EG':>8} {'MAE':>8} {'RMSE':>8} {'Convergencia':>15}\n")
+                self.results_text.insert(tk.END, "-"*60 + "\n")
+                self.results_text.insert(tk.END, f"{'Entrenamiento':<15} {error_general_train:>8.4f} {mae_train:>8.4f} {rmse_train:>8.4f} {convergencia_train:>15}\n")
+                self.results_text.insert(tk.END, f"{'Prueba':<15} {error_general_test:>8.4f} {mae_test:>8.4f} {rmse_test:>8.4f} {'—':>15}\n")
+                self.results_text.insert(tk.END, "="*60 + "\n")
             else:
                 self.results_text.insert(tk.END, "No hay suficientes datos para prueba (test set vacío).\n")
         else:
@@ -766,10 +849,162 @@ class RBF_GUI:
             self.results_text.insert(tk.END, "  Sugerencia: Aumentar el número de centros radiales\n", 'warning')
             self.results_text.tag_config('warning', foreground='red', font=('Courier', 9, 'bold'))
             self.results_text.insert(tk.END, "\nNo se realiza prueba sobre datos de test porque la red no converge.\n")
+        
+        # Guardar resultados automáticamente
+        self.save_training_results(error_general_train, mae_train, rmse_train, error_optimo,
+                                   error_general_test if len(X_test) > 0 and error_general_train <= error_optimo else None,
+                                   mae_test if len(X_test) > 0 and error_general_train <= error_optimo else None,
+                                   rmse_test if len(X_test) > 0 and error_general_train <= error_optimo else None)
+        
         self.update_graphs(Y_pred_train, errors_train, error_general_train, error_optimo)
+    
+    def save_training_results(self, eg_train, mae_train, rmse_train, error_optimo, 
+                              eg_test=None, mae_test=None, rmse_test=None):
+        """Guardar resultados de entrenamiento en carpeta /resultados"""
+        try:
+            # Crear carpeta resultados si no existe
+            results_dir = os.path.join(os.getcwd(), "resultados")
+            os.makedirs(results_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # 1. Guardar métricas en JSON
+            metrics = {
+                "fecha_hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "configuracion": {
+                    "num_centros": int(self.num_centers_var.get()),
+                    "error_optimo": float(error_optimo),
+                    "porcentaje_entrenamiento": int(self.train_pct_var.get())
+                },
+                "entrenamiento": {
+                    "EG": float(eg_train),
+                    "MAE": float(mae_train),
+                    "RMSE": float(rmse_train),
+                    "convergencia": bool(eg_train <= error_optimo)
+                }
+            }
+            
+            if eg_test is not None:
+                metrics["prueba"] = {
+                    "EG": float(eg_test),
+                    "MAE": float(mae_test),
+                    "RMSE": float(rmse_test)
+                }
+            
+            metrics_path = os.path.join(results_dir, f"metricas_{timestamp}.json")
+            with open(metrics_path, 'w', encoding='utf-8') as f:
+                json.dump(metrics, f, indent=4, ensure_ascii=False)
+            
+            # 2. Guardar gráficos como PNG
+            graph1_path = os.path.join(results_dir, f"grafico_yr_vs_yd_{timestamp}.png")
+            self.fig1.savefig(graph1_path, dpi=150, bbox_inches='tight')
+            
+            graph2_path = os.path.join(results_dir, f"grafico_error_{timestamp}.png")
+            self.fig2.savefig(graph2_path, dpi=150, bbox_inches='tight')
+            
+            graph3_path = os.path.join(results_dir, f"grafico_dispersion_{timestamp}.png")
+            self.fig3.savefig(graph3_path, dpi=150, bbox_inches='tight')
+            
+            # 3. Guardar modelo directamente con pickle
+            model_path = os.path.join(results_dir, f"modelo_{timestamp}.rbf.pkl")
+            import pickle
+            with open(model_path, 'wb') as f:
+                pickle.dump(self.rbf, f)
+            
+            self.results_text.insert(tk.END, f"\n✓ Resultados guardados en: {results_dir}\n")
+            self.results_text.insert(tk.END, f"  - Métricas: metricas_{timestamp}.json\n")
+            self.results_text.insert(tk.END, f"  - Gráficos: grafico_*.png\n")
+            self.results_text.insert(tk.END, f"  - Modelo: modelo_{timestamp}.rbf.pkl\n")
+            
+        except Exception as e:
+            self.results_text.insert(tk.END, f"\n⚠ Error al guardar resultados: {str(e)}\n")
+
+    def expand_graph(self, graph_number):
+        """Abrir un gráfico en una ventana separada expandida"""
+        # Crear ventana emergente
+        graph_window = tk.Toplevel(self.root)
+        graph_window.configure(bg='#f0f0f0')
+        
+        # Configurar según el número de gráfico
+        if graph_number == 1:
+            graph_window.title("Gráfico Expandido: Salidas Deseadas vs Salidas de la Red")
+            graph_window.geometry("1000x700")
+            fig = Figure(figsize=(12, 8), dpi=100)
+            ax = fig.add_subplot(111)
+            
+            # Recrear gráfico 1
+            if hasattr(self.rbf, 'Y_train') and self.rbf.Y_train is not None:
+                Y_pred = self.rbf.predict(self.rbf.X_train)
+                n = len(Y_pred)
+                patterns = np.arange(1, n + 1)
+                ax.plot(patterns, self.rbf.Y_train, 'o-', label='YD (Deseada)', 
+                       color='#3498db', linewidth=3, markersize=10)
+                ax.plot(patterns, Y_pred, 's-', label='YR (Red)', 
+                       color='#e74c3c', linewidth=3, markersize=10)
+                ax.set_xlabel('Patrón', fontsize=14, fontweight='bold')
+                ax.set_ylabel('Salida', fontsize=14, fontweight='bold')
+                ax.set_title('Salidas Deseadas vs Salidas de la Red (Entrenamiento)', 
+                           fontsize=16, fontweight='bold')
+                ax.legend(loc='best', fontsize=12)
+                ax.grid(True, alpha=0.3)
+                ax.set_xticks(patterns)
+                
+        elif graph_number == 2:
+            graph_window.title("Gráfico Expandido: Análisis de Errores")
+            graph_window.geometry("1000x700")
+            fig = Figure(figsize=(12, 8), dpi=100)
+            ax = fig.add_subplot(111)
+            
+            # Recrear gráfico 2
+            if hasattr(self.rbf, 'Y_train') and self.rbf.Y_train is not None:
+                Y_pred = self.rbf.predict(self.rbf.X_train)
+                errors = self.rbf.Y_train - Y_pred
+                error_general = np.mean(np.abs(errors))
+                error_optimo = self.error_optimo_var.get()
+                n = len(errors)
+                patterns = np.arange(1, n + 1)
+                colors = ['#e74c3c' if abs(e) > error_optimo/n else '#27ae60' for e in errors]
+                ax.bar(patterns, np.abs(errors), color=colors, alpha=0.7, label='|Error| por patrón')
+                ax.axhline(y=error_general, color='#3498db', linestyle='--', 
+                          linewidth=3, label=f'EG = {error_general:.4f}')
+                ax.axhline(y=error_optimo, color='#f39c12', linestyle='--', 
+                          linewidth=3, label=f'Error Óptimo = {error_optimo:.4f}')
+                ax.set_xlabel('Patrón', fontsize=14, fontweight='bold')
+                ax.set_ylabel('Error', fontsize=14, fontweight='bold')
+                ax.set_title('Análisis de Errores por Patrón', fontsize=16, fontweight='bold')
+                ax.legend(loc='best', fontsize=12)
+                ax.grid(True, alpha=0.3)
+                ax.set_xticks(patterns)
+                
+        elif graph_number == 3:
+            graph_window.title("Gráfico Expandido: Dispersión de Predicciones")
+            graph_window.geometry("1000x700")
+            fig = Figure(figsize=(12, 8), dpi=100)
+            ax = fig.add_subplot(111)
+            
+            # Recrear gráfico 3
+            if hasattr(self.rbf, 'Y_train') and self.rbf.Y_train is not None:
+                Y_pred = self.rbf.predict(self.rbf.X_train)
+                ax.scatter(self.rbf.Y_train, Y_pred, color='#3498db', s=150, alpha=0.6, 
+                          edgecolors='black', linewidth=2, label='Predicciones')
+                min_val = min(self.rbf.Y_train.min(), Y_pred.min())
+                max_val = max(self.rbf.Y_train.max(), Y_pred.max())
+                ax.plot([min_val, max_val], [min_val, max_val], 'r--', 
+                       linewidth=3, label='Ideal (Yd = Yr)')
+                ax.set_xlabel('YD (Salida Deseada)', fontsize=14, fontweight='bold')
+                ax.set_ylabel('YR (Salida Predicha)', fontsize=14, fontweight='bold')
+                ax.set_title('Dispersión: Predicciones vs Valores Reales', 
+                           fontsize=16, fontweight='bold')
+                ax.legend(loc='best', fontsize=12)
+                ax.grid(True, alpha=0.3)
+        
+        fig.tight_layout()
+        canvas = FigureCanvasTkAgg(fig, master=graph_window)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        canvas.draw()
 
     def update_graphs(self, Y_pred, errors, error_general, error_optimo):
-        plot_train_results(self.ax1, self.ax2, self.rbf.Y_train, Y_pred, errors, error_general, error_optimo)
+        plot_train_results(self.ax1, self.ax2, self.ax3, self.rbf.Y_train, Y_pred, errors, error_general, error_optimo)
     def __init__(self, root):
         self.root = root
         self.root.title("Red Neuronal de Funciones de Base Radial (RBF)")
@@ -882,6 +1117,8 @@ class RBF_GUI:
                   bg='#2ecc71', fg='white', font=('Arial', 8, 'bold')).pack(side=tk.LEFT, padx=2)
         tk.Button(btns, text="☁️ Drive", command=self.open_from_drive,
                   bg='#16a085', fg='white', font=('Arial', 8, 'bold')).pack(side=tk.LEFT, padx=2)
+        tk.Button(btns, text="🌐 URL", command=self.download_from_url,
+                  bg='#3498db', fg='white', font=('Arial', 8, 'bold')).pack(side=tk.LEFT, padx=2)
         tk.Button(btns, text="Editar", command=self.edit_data,
                   bg='#9b59b6', fg='white', font=('Arial', 8)).pack(side=tk.LEFT, padx=2)
         
@@ -955,19 +1192,67 @@ class RBF_GUI:
         
         tk.Label(right_column, text="Gráficas de Entrenamiento",
                 font=('Arial', 11, 'bold'), bg='#f0f0f0').pack(pady=5)
+        
+        # Contenedor para gráficos con grid (espacio equitativo)
+        graphs_container = tk.Frame(right_column, bg='#f0f0f0')
+        graphs_container.pack(fill=tk.BOTH, expand=True)
+        
+        # Configurar 3 filas con peso igual para distribuir espacio uniformemente
+        graphs_container.grid_rowconfigure(0, weight=1, uniform="graphs")
+        graphs_container.grid_rowconfigure(1, weight=1, uniform="graphs")
+        graphs_container.grid_rowconfigure(2, weight=1, uniform="graphs")
+        graphs_container.grid_columnconfigure(0, weight=1)
 
-        graph1_frame = tk.LabelFrame(right_column, text="Salidas Deseadas vs Salidas de la Red",
+        # Gráfico 1
+        graph1_frame = tk.LabelFrame(graphs_container, text="Salidas Deseadas vs Salidas de la Red",
                                      font=('Arial', 9, 'bold'), bg='#f0f0f0', padx=5, pady=5)
-        graph1_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
-        self.fig1 = Figure(figsize=(6, 4), dpi=90)
+        graph1_frame.grid(row=0, column=0, sticky='nsew', padx=5, pady=(0, 3))
+        
+        # Botón para expandir gráfico 1
+        btn_container1 = tk.Frame(graph1_frame, bg='#f0f0f0')
+        btn_container1.pack(fill=tk.X, pady=(0, 3))
+        expand_btn1 = tk.Button(btn_container1, text="🔍 Expandir", command=lambda: self.expand_graph(1),
+                               bg='#3498db', fg='white', font=('Arial', 7, 'bold'),
+                               cursor='hand2')
+        expand_btn1.pack(side=tk.RIGHT)
+        
+        self.fig1 = Figure(figsize=(6, 3), dpi=90)
         self.ax1 = self.fig1.add_subplot(111)
         self.canvas1 = FigureCanvasTkAgg(self.fig1, master=graph1_frame)
         self.canvas1.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        graph2_frame = tk.LabelFrame(right_column, text="Análisis de Errores",
+        # Gráfico 2
+        graph2_frame = tk.LabelFrame(graphs_container, text="Análisis de Errores",
                                      font=('Arial', 9, 'bold'), bg='#f0f0f0', padx=5, pady=5)
-        graph2_frame.pack(fill=tk.BOTH, expand=True)
-        self.fig2 = Figure(figsize=(6, 4), dpi=90)
+        graph2_frame.grid(row=1, column=0, sticky='nsew', padx=5, pady=3)
+        
+        # Botón para expandir gráfico 2
+        btn_container2 = tk.Frame(graph2_frame, bg='#f0f0f0')
+        btn_container2.pack(fill=tk.X, pady=(0, 3))
+        expand_btn2 = tk.Button(btn_container2, text="🔍 Expandir", command=lambda: self.expand_graph(2),
+                               bg='#3498db', fg='white', font=('Arial', 7, 'bold'),
+                               cursor='hand2')
+        expand_btn2.pack(side=tk.RIGHT)
+        
+        self.fig2 = Figure(figsize=(6, 3), dpi=90)
         self.ax2 = self.fig2.add_subplot(111)
         self.canvas2 = FigureCanvasTkAgg(self.fig2, master=graph2_frame)
         self.canvas2.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Gráfico 3
+        graph3_frame = tk.LabelFrame(graphs_container, text="Dispersión: Predicciones vs Valores Reales",
+                                     font=('Arial', 9, 'bold'), bg='#f0f0f0', padx=5, pady=5)
+        graph3_frame.grid(row=2, column=0, sticky='nsew', padx=5, pady=(3, 0))
+        
+        # Botón para expandir gráfico 3
+        btn_container3 = tk.Frame(graph3_frame, bg='#f0f0f0')
+        btn_container3.pack(fill=tk.X, pady=(0, 3))
+        expand_btn3 = tk.Button(btn_container3, text="🔍 Expandir", command=lambda: self.expand_graph(3),
+                               bg='#3498db', fg='white', font=('Arial', 7, 'bold'),
+                               cursor='hand2')
+        expand_btn3.pack(side=tk.RIGHT)
+        
+        self.fig3 = Figure(figsize=(6, 3), dpi=90)
+        self.ax3 = self.fig3.add_subplot(111)
+        self.canvas3 = FigureCanvasTkAgg(self.fig3, master=graph3_frame)
+        self.canvas3.get_tk_widget().pack(fill=tk.BOTH, expand=True)

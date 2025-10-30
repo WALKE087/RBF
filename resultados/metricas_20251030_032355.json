@@ -1,0 +1,19 @@
+{
+    "fecha_hora": "2025-10-30 03:23:55",
+    "configuracion": {
+        "num_centros": 18,
+        "error_optimo": 0.1,
+        "porcentaje_entrenamiento": 80
+    },
+    "entrenamiento": {
+        "EG": 0.057028107898411305,
+        "MAE": 0.057028107898411305,
+        "RMSE": 0.07980303225156014,
+        "convergencia": true
+    },
+    "prueba": {
+        "EG": 0.24228420657021651,
+        "MAE": 0.24228420657021651,
+        "RMSE": 0.3767973636364523
+    }
+}
